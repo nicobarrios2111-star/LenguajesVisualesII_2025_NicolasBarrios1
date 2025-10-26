@@ -1,1 +1,44 @@
 Commit 1: Estructura base y planificación inicial del proyecto con CSV
+
+
+import tkinter as tk
+from tkinter import ttk, messagebox
+import csv
+import os
+
+# Archivo CSV donde se guardarán las tareas
+CSV_FILE = "tareas.csv"
+
+# Crear el archivo si no existe
+if not os.path.exists(CSV_FILE):
+    with open(CSV_FILE, "w", newline="", encoding="utf-8") as file:
+        writer = csv.writer(file)
+        writer.writerow(["fecha", "titulo", "descripcion", "tipo", "hora"])
+
+# Ventana principal
+class CalendarioApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Calendario con Gestor de Tareas")
+        self.root.geometry("600x400")
+        
+        # Label de bienvenida
+        self.label = ttk.Label(root, text="Bienvenido al Calendario con Gestor de Tareas", font=("Helvetica", 14))
+        self.label.pack(pady=20)
+        
+        # Placeholder para calendario (se agregará en próximos commits)
+        self.placeholder = ttk.Label(root, text="Aquí se mostrará el calendario", foreground="gray")
+        self.placeholder.pack(pady=10)
+        
+        # Botón de ejemplo
+        self.boton = ttk.Button(root, text="Próximamente: Abrir ventana de tareas", command=self.proximamente)
+        self.boton.pack(pady=10)
+    
+    def proximamente(self):
+        messagebox.showinfo("Info", "Esta funcionalidad se agregará en el siguiente commit.")
+
+# Ejecutar la aplicación
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = CalendarioApp(root)
+    root.mainloop()
