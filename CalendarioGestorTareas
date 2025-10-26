@@ -582,3 +582,259 @@ if __name__ == "__main__":
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+Commit 5: Funcionalidades finales y optimización
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+import tkinter as tk
+from tkinter import ttk, messagebox
+from tkcalendar import Calendar
+import csv
+import os
+
+# Archivo CSV donde se guardarán las tareas
+CSV_FILE = "tareas.csv"
+
+# Crear el archivo si no existe
+if not os.path.exists(CSV_FILE):
+    with open(CSV_FILE, "w", newline="", encoding="utf-8") as file:
+        writer = csv.writer(file)
+        writer.writerow(["fecha", "titulo", "descripcion", "tipo", "hora", "completada"])
+
+# Función para leer tareas de una fecha
+def leer_tareas(fecha):
+    tareas = []
+    with open(CSV_FILE, newline="", encoding="utf-8") as file:
+        reader = csv.DictReader(file)
+        for row in reader:
+            if row["fecha"] == fecha:
+                tareas.append(row)
+    return tareas
+
+# Función para escribir todas las tareas
+def escribir_tareas(tareas):
+    with open(CSV_FILE, "w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=["fecha", "titulo", "descripcion", "tipo", "hora", "completada"])
+        writer.writeheader()
+        for t in tareas:
+            writer.writerow(t)
+
+# Ventana principal
+class CalendarioApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Calendario con Gestor de Tareas")
+        self.root.geometry("800x550")
+
+        # Label de bienvenida
+        self.label = ttk.Label(root, text="Calendario con Gestor de Tareas", font=("Helvetica", 16))
+        self.label.pack(pady=10)
+
+        # Calendario
+        self.cal = Calendar(root, selectmode="day")
+        self.cal.pack(pady=10)
+
+        # Botones
+        frame_botones = ttk.Frame(root)
+        frame_botones.pack(pady=5)
+
+        self.btn_mostrar = ttk.Button(frame_botones, text="Mostrar tareas", command=self.mostrar_tareas)
+        self.btn_mostrar.grid(row=0, column=0, padx=5)
+
+        self.btn_agregar = ttk.Button(frame_botones, text="Agregar tarea", command=self.agregar_tarea)
+        self.btn_agregar.grid(row=0, column=1, padx=5)
+
+        self.btn_editar = ttk.Button(frame_botones, text="Editar tarea", command=self.editar_tarea)
+        self.btn_editar.grid(row=0, column=2, padx=5)
+
+        self.btn_eliminar = ttk.Button(frame_botones, text="Eliminar tarea", command=self.eliminar_tarea)
+        self.btn_eliminar.grid(row=0, column=3, padx=5)
+
+        self.btn_completar = ttk.Button(frame_botones, text="Marcar/Desmarcar completada", command=self.marcar_completada)
+        self.btn_completar.grid(row=0, column=4, padx=5)
+
+        # Treeview para mostrar tareas
+        self.tree = ttk.Treeview(root, columns=("titulo", "descripcion", "tipo", "hora", "completada"), show="headings")
+        self.tree.heading("titulo", text="Título")
+        self.tree.heading("descripcion", text="Descripción")
+        self.tree.heading("tipo", text="Tipo")
+        self.tree.heading("hora", text="Hora")
+        self.tree.heading("completada", text="Completada")
+        self.tree.pack(fill="both", expand=True, pady=10)
+
+        # Colores para tareas completadas
+        self.tree.tag_configure("completada", background="#d3ffd3")
+
+    # Mostrar tareas
+    def mostrar_tareas(self):
+        fecha = self.cal.get_date()
+        tareas = leer_tareas(fecha)
+        for i in self.tree.get_children():
+            self.tree.delete(i)
+        for t in tareas:
+            values = (t["titulo"], t["descripcion"], t["tipo"], t["hora"], t.get("completada", "No"))
+            tag = "completada" if t.get("completada")=="Sí" else ""
+            self.tree.insert("", "end", values=values, tags=(tag,))
+        if not tareas:
+            messagebox.showinfo("Info", f"No hay tareas para {fecha}")
+
+    # Agregar tarea
+    def agregar_tarea(self):
+        fecha = self.cal.get_date()
+        ventana = tk.Toplevel(self.root)
+        ventana.title("Agregar Tarea")
+
+        ttk.Label(ventana, text="Título:").grid(row=0, column=0, pady=5, sticky="e")
+        entrada_titulo = ttk.Entry(ventana)
+        entrada_titulo.grid(row=0, column=1, pady=5)
+
+        ttk.Label(ventana, text="Descripción:").grid(row=1, column=0, pady=5, sticky="e")
+        entrada_desc = ttk.Entry(ventana)
+        entrada_desc.grid(row=1, column=1, pady=5)
+
+        ttk.Label(ventana, text="Tipo:").grid(row=2, column=0, pady=5, sticky="e")
+        entrada_tipo = ttk.Entry(ventana)
+        entrada_tipo.grid(row=2, column=1, pady=5)
+
+        ttk.Label(ventana, text="Hora (HH:MM):").grid(row=3, column=0, pady=5, sticky="e")
+        entrada_hora = ttk.Entry(ventana)
+        entrada_hora.grid(row=3, column=1, pady=5)
+
+        def guardar():
+            titulo = entrada_titulo.get().strip()
+            if not titulo:
+                messagebox.showwarning("Atención", "El título no puede estar vacío")
+                return
+            descripcion = entrada_desc.get().strip()
+            tipo = entrada_tipo.get().strip()
+            hora = entrada_hora.get().strip()
+            nueva_tarea = {"fecha": fecha, "titulo": titulo, "descripcion": descripcion, "tipo": tipo, "hora": hora, "completada": "No"}
+            todas_tareas = self.leer_todas_tareas()
+            todas_tareas.append(nueva_tarea)
+            escribir_tareas(todas_tareas)
+            self.mostrar_tareas()
+            ventana.destroy()
+
+        ttk.Button(ventana, text="Guardar", command=guardar).grid(row=4, column=0, columnspan=2, pady=10)
+
+    # Editar tarea
+    def editar_tarea(self):
+        seleccionado = self.tree.selection()
+        if not seleccionado:
+            messagebox.showwarning("Atención", "Seleccione una tarea")
+            return
+        item = self.tree.item(seleccionado)
+        titulo_actual, descripcion_actual, tipo_actual, hora_actual, completada_actual = item["values"]
+        fecha = self.cal.get_date()
+        ventana = tk.Toplevel(self.root)
+        ventana.title("Editar Tarea")
+
+        ttk.Label(ventana, text="Título:").grid(row=0, column=0, pady=5, sticky="e")
+        entrada_titulo = ttk.Entry(ventana)
+        entrada_titulo.insert(0, titulo_actual)
+        entrada_titulo.grid(row=0, column=1, pady=5)
+
+        ttk.Label(ventana, text="Descripción:").grid(row=1, column=0, pady=5, sticky="e")
+        entrada_desc = ttk.Entry(ventana)
+        entrada_desc.insert(0, descripcion_actual)
+        entrada_desc.grid(row=1, column=1, pady=5)
+
+        ttk.Label(ventana, text="Tipo:").grid(row=2, column=0, pady=5, sticky="e")
+        entrada_tipo = ttk.Entry(ventana)
+        entrada_tipo.insert(0, tipo_actual)
+        entrada_tipo.grid(row=2, column=1, pady=5)
+
+        ttk.Label(ventana, text="Hora (HH:MM):").grid(row=3, column=0, pady=5, sticky="e")
+        entrada_hora = ttk.Entry(ventana)
+        entrada_hora.insert(0, hora_actual)
+        entrada_hora.grid(row=3, column=1, pady=5)
+
+        def guardar():
+            nuevo_titulo = entrada_titulo.get().strip()
+            if not nuevo_titulo:
+                messagebox.showwarning("Atención", "El título no puede estar vacío")
+                return
+            todas_tareas = self.leer_todas_tareas()
+            for t in todas_tareas:
+                if t["fecha"] == fecha and t["titulo"] == titulo_actual and t["hora"] == hora_actual:
+                    t["titulo"] = nuevo_titulo
+                    t["descripcion"] = entrada_desc.get().strip()
+                    t["tipo"] = entrada_tipo.get().strip()
+                    t["hora"] = entrada_hora.get().strip()
+                    break
+            escribir_tareas(todas_tareas)
+            self.mostrar_tareas()
+            ventana.destroy()
+
+        ttk.Button(ventana, text="Guardar", command=guardar).grid(row=4, column=0, columnspan=2, pady=10)
+
+    # Eliminar tarea
+    def eliminar_tarea(self):
+        seleccionado = self.tree.selection()
+        if not seleccionado:
+            messagebox.showwarning("Atención", "Seleccione una tarea")
+            return
+        item = self.tree.item(seleccionado)
+        titulo, descripcion, tipo, hora, completada = item["values"]
+        fecha = self.cal.get_date()
+        if messagebox.askyesno("Confirmar", f"¿Desea eliminar la tarea '{titulo}'?"):
+            todas_tareas = self.leer_todas_tareas()
+            todas_tareas = [t for t in todas_tareas if not (t["fecha"]==fecha and t["titulo"]==titulo and t["hora"]==hora)]
+            escribir_tareas(todas_tareas)
+            self.mostrar_tareas()
+
+    # Marcar/desmarcar completada
+    def marcar_completada(self):
+        seleccionado = self.tree.selection()
+        if not seleccionado:
+            messagebox.showwarning("Atención", "Seleccione una tarea")
+            return
+        item = self.tree.item(seleccionado)
+        titulo, descripcion, tipo, hora, completada = item["values"]
+        fecha = self.cal.get_date()
+        todas_tareas = self.leer_todas_tareas()
+        for t in todas_tareas:
+            if t["fecha"]==fecha and t["titulo"]==titulo and t["hora"]==hora:
+                t["completada"] = "No" if t.get("completada")=="Sí" else "Sí"
+                break
+        escribir_tareas(todas_tareas)
+        self.mostrar_tareas()
+
+    # Leer todas las tareas
+    def leer_todas_tareas(self):
+        tareas = []
+        with open(CSV_FILE, newline="", encoding="utf-8") as file:
+            reader = csv.DictReader(file)
+            for row in reader:
+                tareas.append(row)
+        return tareas
+
+# Ejecutar
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = CalendarioApp(root)
+    root.mainloop()
+
+
