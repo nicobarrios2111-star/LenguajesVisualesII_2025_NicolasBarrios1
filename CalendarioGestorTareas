@@ -1,6 +1,8 @@
 Commit 1: Estructura base y planificación inicial del proyecto con CSV
 
 
+
+
 import tkinter as tk
 from tkinter import ttk, messagebox
 import csv
@@ -46,7 +48,12 @@ if __name__ == "__main__":
 
 
 
+
+
 Commit 2: Calendario funcional y Treeview para tareas
+
+
+
 
 
 import tkinter as tk
