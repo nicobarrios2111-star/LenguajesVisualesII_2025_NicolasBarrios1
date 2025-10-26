@@ -128,3 +128,193 @@ if __name__ == "__main__":
     root = tk.Tk()
     app = CalendarioApp(root)
     root.mainloop()
+
+
+
+
+
+
+
+
+Commit 3: Funcionalidad completa de Agregar, Editar y Eliminar tareas, actualización del CSV y Treeview.
+
+
+
+
+
+
+
+import tkinter as tk
+from tkinter import ttk, messagebox, simpledialog
+from tkcalendar import Calendar
+import csv
+import os
+
+# Archivo CSV donde se guardarán las tareas
+CSV_FILE = "tareas.csv"
+
+# Crear el archivo si no existe
+if not os.path.exists(CSV_FILE):
+    with open(CSV_FILE, "w", newline="", encoding="utf-8") as file:
+        writer = csv.writer(file)
+        writer.writerow(["fecha", "titulo", "descripcion", "tipo", "hora"])
+
+# Función para leer tareas de una fecha
+def leer_tareas(fecha):
+    tareas = []
+    with open(CSV_FILE, newline="", encoding="utf-8") as file:
+        reader = csv.DictReader(file)
+        for row in reader:
+            if row["fecha"] == fecha:
+                tareas.append(row)
+    return tareas
+
+# Función para escribir todas las tareas (reemplaza el CSV completo)
+def escribir_tareas(tareas):
+    with open(CSV_FILE, "w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=["fecha", "titulo", "descripcion", "tipo", "hora"])
+        writer.writeheader()
+        for t in tareas:
+            writer.writerow(t)
+
+# Ventana principal
+class CalendarioApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Calendario con Gestor de Tareas")
+        self.root.geometry("750x550")
+
+        # Label de bienvenida
+        self.label = ttk.Label(root, text="Calendario con Gestor de Tareas", font=("Helvetica", 16))
+        self.label.pack(pady=10)
+
+        # Calendario
+        self.cal = Calendar(root, selectmode="day")
+        self.cal.pack(pady=10)
+
+        # Botones
+        frame_botones = ttk.Frame(root)
+        frame_botones.pack(pady=5)
+
+        self.btn_mostrar = ttk.Button(frame_botones, text="Mostrar tareas", command=self.mostrar_tareas)
+        self.btn_mostrar.grid(row=0, column=0, padx=5)
+
+        self.btn_agregar = ttk.Button(frame_botones, text="Agregar tarea", command=self.agregar_tarea)
+        self.btn_agregar.grid(row=0, column=1, padx=5)
+
+        self.btn_editar = ttk.Button(frame_botones, text="Editar tarea", command=self.editar_tarea)
+        self.btn_editar.grid(row=0, column=2, padx=5)
+
+        self.btn_eliminar = ttk.Button(frame_botones, text="Eliminar tarea", command=self.eliminar_tarea)
+        self.btn_eliminar.grid(row=0, column=3, padx=5)
+
+        # Treeview para mostrar tareas
+        self.tree = ttk.Treeview(root, columns=("titulo", "descripcion", "tipo", "hora"), show="headings")
+        self.tree.heading("titulo", text="Título")
+        self.tree.heading("descripcion", text="Descripción")
+        self.tree.heading("tipo", text="Tipo")
+        self.tree.heading("hora", text="Hora")
+        self.tree.pack(fill="both", expand=True, pady=10)
+
+    # Mostrar tareas en Treeview
+    def mostrar_tareas(self):
+        fecha = self.cal.get_date()
+        tareas = leer_tareas(fecha)
+
+        # Limpiar Treeview
+        for i in self.tree.get_children():
+            self.tree.delete(i)
+
+        if tareas:
+            for t in tareas:
+                self.tree.insert("", "end", values=(t["titulo"], t["descripcion"], t["tipo"], t["hora"]))
+        else:
+            messagebox.showinfo("Info", f"No hay tareas para {fecha}")
+
+    # Agregar nueva tarea
+    def agregar_tarea(self):
+        fecha = self.cal.get_date()
+        titulo = simpledialog.askstring("Título", "Ingrese el título de la tarea:")
+        if not titulo:
+            return
+        descripcion = simpledialog.askstring("Descripción", "Ingrese la descripción:")
+        tipo = simpledialog.askstring("Tipo", "Ingrese el tipo de tarea:")
+        hora = simpledialog.askstring("Hora", "Ingrese la hora (HH:MM):")
+
+        nueva_tarea = {"fecha": fecha, "titulo": titulo, "descripcion": descripcion, "tipo": tipo, "hora": hora}
+        
+        tareas = leer_tareas(fecha)
+        tareas.append(nueva_tarea)
+
+        # Guardar todas las tareas del CSV
+        todas_tareas = self.leer_todas_tareas()
+        todas_tareas.append(nueva_tarea)
+        escribir_tareas(todas_tareas)
+
+        self.mostrar_tareas()
+
+    # Editar tarea seleccionada
+    def editar_tarea(self):
+        seleccionado = self.tree.selection()
+        if not seleccionado:
+            messagebox.showwarning("Atención", "Seleccione una tarea para editar")
+            return
+
+        item = self.tree.item(seleccionado)
+        titulo_actual, descripcion_actual, tipo_actual, hora_actual = item["values"]
+        fecha = self.cal.get_date()
+
+        nuevo_titulo = simpledialog.askstring("Editar Título", "Nuevo título:", initialvalue=titulo_actual)
+        if not nuevo_titulo:
+            return
+        nueva_descripcion = simpledialog.askstring("Editar Descripción", "Nueva descripción:", initialvalue=descripcion_actual)
+        nuevo_tipo = simpledialog.askstring("Editar Tipo", "Nuevo tipo:", initialvalue=tipo_actual)
+        nueva_hora = simpledialog.askstring("Editar Hora", "Nueva hora:", initialvalue=hora_actual)
+
+        # Actualizar CSV
+        todas_tareas = self.leer_todas_tareas()
+        for t in todas_tareas:
+            if t["fecha"] == fecha and t["titulo"] == titulo_actual and t["hora"] == hora_actual:
+                t["titulo"] = nuevo_titulo
+                t["descripcion"] = nueva_descripcion
+                t["tipo"] = nuevo_tipo
+                t["hora"] = nueva_hora
+                break
+        escribir_tareas(todas_tareas)
+        self.mostrar_tareas()
+
+    # Eliminar tarea seleccionada
+    def eliminar_tarea(self):
+        seleccionado = self.tree.selection()
+        if not seleccionado:
+            messagebox.showwarning("Atención", "Seleccione una tarea para eliminar")
+            return
+
+        item = self.tree.item(seleccionado)
+        titulo, descripcion, tipo, hora = item["values"]
+        fecha = self.cal.get_date()
+
+        if messagebox.askyesno("Confirmar", f"¿Desea eliminar la tarea '{titulo}'?"):
+            todas_tareas = self.leer_todas_tareas()
+            todas_tareas = [t for t in todas_tareas if not (t["fecha"] == fecha and t["titulo"] == titulo and t["hora"] == hora)]
+            escribir_tareas(todas_tareas)
+            self.mostrar_tareas()
+
+    # Función para leer todas las tareas del CSV
+    def leer_todas_tareas(self):
+        tareas = []
+        with open(CSV_FILE, newline="", encoding="utf-8") as file:
+            reader = csv.DictReader(file)
+            for row in reader:
+                tareas.append(row)
+        return tareas
+
+# Ejecutar la aplicación
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = CalendarioApp(root)
+    root.mainloop()
+
+
+
+
