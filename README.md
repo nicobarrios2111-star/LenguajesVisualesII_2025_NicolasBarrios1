@@ -3,31 +3,19 @@ Calendario con Gestor de Tareas
 Objetivo del proyecto:
 Desarrollar una aplicación de escritorio en Python utilizando Tkinter que permita a los usuarios gestionar tareas y eventos a través de un calendario interactivo. El sistema integrará funciones CRUD (Crear, Leer, Actualizar, Eliminar) para una gestión completa de tareas con almacenamiento persistente en archivo CSV.
 Publico Objetivo:
-Características del Usuario
-
+Características del Usuario:
 Estudiantes universitarios: Para organizar tareas, exámenes y trabajos prácticos
-
 Profesionales: Gestión de reuniones, deadlines y proyectos laborales
-
 Personas organizadas: Que necesitan planificar actividades personales
-
 Usuarios técnicos: Confortables con aplicaciones de escritorio simples
-
-Necesidades Cubiertas
-
- Organización visual de tareas por fecha
-
- Categorización de actividades por tipo
-
- Seguimiento de estado de completitud
-
- Almacenamiento local sin dependencia de internet
-
- Interfaz intuitiva y de rápido acceso
+Necesidades Cubiertas:
+- Organización visual de tareas por fecha
+- Categorización de actividades por tipo
+- Seguimiento de estado de completitud
+- Almacenamiento local sin dependencia de internet
+- Interfaz intuitiva y de rápido acceso
 
 Funciones básicas del programa:
-
-
 
 leer_tareas(fecha): Lee las tareas del archivo CSV que coinciden con la fecha seleccionada.
 escribir_tareas(tareas):	Guarda todas las tareas en el archivo CSV.
