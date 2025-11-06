@@ -20,7 +20,7 @@ if not os.path.exists(CSV_FILE):
 
 
 
-Commit 2 — Crear interfaz gráfica básica con calendario y botones
+Commit 2 — Crear interfaz gráfica básica y botones
 
 
 
@@ -28,7 +28,7 @@ Commit 2 — Crear interfaz gráfica básica con calendario y botones
 
 
 from tkinter import ttk, messagebox
-from tkcalendar import Calendar
+from datetime import datetime
 
 class CalendarioApp:
     def __init__(self, root):
