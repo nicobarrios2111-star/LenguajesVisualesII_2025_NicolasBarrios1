@@ -1,8 +1,8 @@
 import tkinter as tk
-from tkinter import ttk, messagebox, simpledialog
+from tkinter import ttk, messagebox
+from tkcalendar import Calendar
 import csv
 import os
-from datetime import datetime
 
 # Archivo CSV donde se guardarán las tareas
 CSV_FILE = "tareas.csv"
@@ -23,6 +23,7 @@ def leer_tareas(fecha):
                 if row["fecha"] == fecha:
                     tareas.append(row)
     except FileNotFoundError:
+        # Si el archivo no existe, se creará automáticamente cuando se agregue una tarea
         pass
     return tareas
 
@@ -36,7 +37,7 @@ def escribir_tareas(tareas):
 
 # Ventana principal
 class CalendarioApp:
-    def __init__(self, root):
+    def __init__(self, root):  # CORREGIDO: __init__ en lugar de _init_
         self.root = root
         self.root.title("Calendario con Gestor de Tareas")
         self.root.geometry("800x550")
@@ -45,16 +46,9 @@ class CalendarioApp:
         self.label = ttk.Label(root, text="Calendario con Gestor de Tareas", font=("Helvetica", 16))
         self.label.pack(pady=10)
 
-        # Frame para selección de fecha (en lugar de calendario)
-        frame_fecha = ttk.Frame(root)
-        frame_fecha.pack(pady=10)
-        
-        ttk.Label(frame_fecha, text="Fecha (DD/MM/AAAA):").grid(row=0, column=0, padx=5)
-        self.entrada_fecha = ttk.Entry(frame_fecha, width=15)
-        self.entrada_fecha.insert(0, datetime.now().strftime("%d/%m/%Y"))
-        self.entrada_fecha.grid(row=0, column=1, padx=5)
-        
-        ttk.Button(frame_fecha, text="Hoy", command=self.establecer_fecha_hoy).grid(row=0, column=2, padx=5)
+        # Calendario
+        self.cal = Calendar(root, selectmode="day")
+        self.cal.pack(pady=10)
 
         # Botones
         frame_botones = ttk.Frame(root)
@@ -87,20 +81,9 @@ class CalendarioApp:
         # Colores para tareas completadas
         self.tree.tag_configure("completada", background="#d3ffd3")
 
-    def establecer_fecha_hoy(self):
-        self.entrada_fecha.delete(0, tk.END)
-        self.entrada_fecha.insert(0, datetime.now().strftime("%d/%m/%Y"))
-
-    def obtener_fecha(self):
-        return self.entrada_fecha.get().strip()
-
     # Mostrar tareas
     def mostrar_tareas(self):
-        fecha = self.obtener_fecha()
-        if not fecha:
-            messagebox.showwarning("Atención", "Ingrese una fecha")
-            return
-            
+        fecha = self.cal.get_date()
         tareas = leer_tareas(fecha)
         
         # Limpiar treeview
@@ -118,15 +101,10 @@ class CalendarioApp:
 
     # Agregar tarea
     def agregar_tarea(self):
-        fecha = self.obtener_fecha()
-        if not fecha:
-            messagebox.showwarning("Atención", "Ingrese una fecha")
-            return
-            
+        fecha = self.cal.get_date()
         ventana = tk.Toplevel(self.root)
         ventana.title("Agregar Tarea")
-        ventana.geometry("300x200")
-        ventana.transient(self.root)
+        ventana.transient(self.root)  # Hacerla modal
         ventana.grab_set()
 
         ttk.Label(ventana, text="Título:").grid(row=0, column=0, pady=5, sticky="e")
@@ -169,9 +147,6 @@ class CalendarioApp:
 
         ttk.Button(ventana, text="Guardar", command=guardar).grid(row=4, column=0, columnspan=2, pady=10)
 
-    # Los demás métodos (editar, eliminar, etc.) se mantienen igual...
-    # ... (copiar los mismos métodos de editar, eliminar, marcar_completada y leer_todas_tareas)
-
     # Editar tarea
     def editar_tarea(self):
         seleccionado = self.tree.selection()
@@ -180,11 +155,10 @@ class CalendarioApp:
             return
         item = self.tree.item(seleccionado)
         titulo_actual, descripcion_actual, tipo_actual, hora_actual, completada_actual = item["values"]
-        fecha = self.obtener_fecha()
+        fecha = self.cal.get_date()
         
         ventana = tk.Toplevel(self.root)
         ventana.title("Editar Tarea")
-        ventana.geometry("300x200")
         ventana.transient(self.root)
         ventana.grab_set()
 
@@ -215,7 +189,7 @@ class CalendarioApp:
                 return
             todas_tareas = self.leer_todas_tareas()
             for t in todas_tareas:
-                if t["fecha"] == fecha and t["titulo"] == titulo_actual and t["descripcion"] == descripcion_actual and t["tipo"] == tipo_actual and t["hora"] == hora_actual:
+                if t["fecha"] == fecha and t["titulo"] == titulo_actual and t["hora"] == hora_actual:
                     t["titulo"] = nuevo_titulo
                     t["descripcion"] = entrada_desc.get().strip()
                     t["tipo"] = entrada_tipo.get().strip()
@@ -235,27 +209,12 @@ class CalendarioApp:
             return
         item = self.tree.item(seleccionado)
         titulo, descripcion, tipo, hora, completada = item["values"]
-        fecha = self.obtener_fecha()
+        fecha = self.cal.get_date()
         if messagebox.askyesno("Confirmar", f"¿Desea eliminar la tarea '{titulo}'?"):
             todas_tareas = self.leer_todas_tareas()
-            # Buscar y eliminar la tarea específica usando todos los campos para mayor precisión
-            tarea_eliminar = None
-            for t in todas_tareas:
-                if (t["fecha"] == fecha and 
-                    t["titulo"] == titulo and 
-                    t["descripcion"] == descripcion and 
-                    t["tipo"] == tipo and 
-                    t["hora"] == hora):
-                    tarea_eliminar = t
-                    break
-            
-            if tarea_eliminar:
-                todas_tareas.remove(tarea_eliminar)
-                escribir_tareas(todas_tareas)
-                self.mostrar_tareas()
-                messagebox.showinfo("Éxito", "Tarea eliminada correctamente")
-            else:
-                messagebox.showerror("Error", "No se pudo encontrar la tarea para eliminar")
+            todas_tareas = [t for t in todas_tareas if not (t["fecha"] == fecha and t["titulo"] == titulo and t["hora"] == hora)]
+            escribir_tareas(todas_tareas)
+            self.mostrar_tareas()
 
     # Marcar/desmarcar completada
     def marcar_completada(self):
@@ -265,25 +224,14 @@ class CalendarioApp:
             return
         item = self.tree.item(seleccionado)
         titulo, descripcion, tipo, hora, completada = item["values"]
-        fecha = self.obtener_fecha()
+        fecha = self.cal.get_date()
         todas_tareas = self.leer_todas_tareas()
-        
-        tarea_encontrada = False
         for t in todas_tareas:
-            if (t["fecha"] == fecha and 
-                t["titulo"] == titulo and 
-                t["descripcion"] == descripcion and 
-                t["tipo"] == tipo and 
-                t["hora"] == hora):
+            if t["fecha"] == fecha and t["titulo"] == titulo and t["hora"] == hora:
                 t["completada"] = "No" if t.get("completada") == "Sí" else "Sí"
-                tarea_encontrada = True
                 break
-        
-        if tarea_encontrada:
-            escribir_tareas(todas_tareas)
-            self.mostrar_tareas()
-        else:
-            messagebox.showerror("Error", "No se pudo encontrar la tarea")
+        escribir_tareas(todas_tareas)
+        self.mostrar_tareas()
 
     # Leer todas las tareas
     def leer_todas_tareas(self):
@@ -299,7 +247,7 @@ class CalendarioApp:
         return tareas
 
 # Ejecutar
-if __name__ == "__main__":
+if __name__ == "__main__":  # CORREGIDO: __main__ en lugar de _main_
     root = tk.Tk()
     app = CalendarioApp(root)
     root.mainloop()
