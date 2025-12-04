@@ -1,253 +1,436 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 from tkcalendar import Calendar
 import csv
 import os
+import sqlite3
+import re
+import logging
+from datetime import datetime
 
-# Archivo CSV donde se guardarán las tareas
-CSV_FILE = "tareas.csv"
+# -------------------------
+# Configuración y logging
+# -------------------------
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+CSV_FILE = os.path.join(BASE_DIR, "tareas.csv")
+DB_FILE = os.path.join(BASE_DIR, "tareas.db")
+LOG_FILE = os.path.join(BASE_DIR, "app.log")
 
-# Crear el archivo si no existe
-if not os.path.exists(CSV_FILE):
-    with open(CSV_FILE, "w", newline="", encoding="utf-8") as file:
-        writer = csv.writer(file)
-        writer.writerow(["fecha", "titulo", "descripcion", "tipo", "hora", "completada"])
+logging.basicConfig(
+    filename=LOG_FILE,
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s"
+)
+logging.info("Inicio de la aplicación")
 
-# Función para leer tareas de una fecha
-def leer_tareas(fecha):
+# -------------------------
+# Utilidades validación
+# -------------------------
+TIME_RE = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")  # HH:MM 00:00-23:59
+
+def validar_hora(hora):
+    if not hora:
+        return True  # hora opcional
+    return bool(TIME_RE.match(hora.strip()))
+
+def ahora():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+# -------------------------
+# Base de datos (SQLite)
+# -------------------------
+def init_db():
+    conn = sqlite3.connect(DB_FILE)
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS tareas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha TEXT NOT NULL,
+            titulo TEXT NOT NULL,
+            descripcion TEXT,
+            tipo TEXT,
+            hora TEXT,
+            completada TEXT CHECK (completada IN ('Sí','No')) DEFAULT 'No',
+            creado_en TEXT,
+            UNIQUE(fecha, titulo, hora)
+        )
+    """)
+    conn.commit()
+    conn.close()
+    logging.info("DB inicializada")
+
+def db_get_tareas_por_fecha(fecha):
+    conn = sqlite3.connect(DB_FILE)
+    cur = conn.cursor()
+    cur.execute("SELECT fecha,titulo,descripcion,tipo,hora,completada FROM tareas WHERE fecha = ? ORDER BY hora", (fecha,))
+    rows = cur.fetchall()
+    conn.close()
     tareas = []
-    try:
-        with open(CSV_FILE, newline="", encoding="utf-8") as file:
-            reader = csv.DictReader(file)
-            for row in reader:
-                if row["fecha"] == fecha:
-                    tareas.append(row)
-    except FileNotFoundError:
-        # Si el archivo no existe, se creará automáticamente cuando se agregue una tarea
-        pass
+    for r in rows:
+        tareas.append({
+            "fecha": r[0],
+            "titulo": r[1],
+            "descripcion": r[2] or "",
+            "tipo": r[3] or "",
+            "hora": r[4] or "",
+            "completada": r[5] or "No"
+        })
     return tareas
 
-# Función para escribir todas las tareas
-def escribir_tareas(tareas):
-    with open(CSV_FILE, "w", newline="", encoding="utf-8") as file:
-        writer = csv.DictWriter(file, fieldnames=["fecha", "titulo", "descripcion", "tipo", "hora", "completada"])
+def db_get_todas_tareas():
+    conn = sqlite3.connect(DB_FILE)
+    cur = conn.cursor()
+    cur.execute("SELECT fecha,titulo,descripcion,tipo,hora,completada FROM tareas ORDER BY fecha,hora")
+    rows = cur.fetchall()
+    conn.close()
+    tareas = []
+    for r in rows:
+        tareas.append({
+            "fecha": r[0],
+            "titulo": r[1],
+            "descripcion": r[2] or "",
+            "tipo": r[3] or "",
+            "hora": r[4] or "",
+            "completada": r[5] or "No"
+        })
+    return tareas
+
+def db_insert_tarea(t):
+    conn = sqlite3.connect(DB_FILE)
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            INSERT INTO tareas(fecha,titulo,descripcion,tipo,hora,completada,creado_en)
+            VALUES(?,?,?,?,?,?,?)
+        """, (t["fecha"], t["titulo"], t.get("descripcion",""), t.get("tipo",""), t.get("hora",""), t.get("completada","No"), ahora()))
+        conn.commit()
+    except sqlite3.IntegrityError as e:
+        conn.close()
+        raise
+    conn.close()
+
+def db_update_tarea(old, nuevo):
+    conn = sqlite3.connect(DB_FILE)
+    cur = conn.cursor()
+    # Match by old keys (fecha, titulo, hora)
+    cur.execute("""
+        UPDATE tareas SET titulo=?, descripcion=?, tipo=?, hora=? 
+        WHERE fecha=? AND titulo=? AND hora=?
+    """, (nuevo["titulo"], nuevo.get("descripcion",""), nuevo.get("tipo",""), nuevo.get("hora",""),
+          old["fecha"], old["titulo"], old["hora"]))
+    conn.commit()
+    conn.close()
+
+def db_delete_tarea(fecha, titulo, hora):
+    conn = sqlite3.connect(DB_FILE)
+    cur = conn.cursor()
+    cur.execute("DELETE FROM tareas WHERE fecha=? AND titulo=? AND hora=?", (fecha, titulo, hora))
+    conn.commit()
+    conn.close()
+
+def db_toggle_completada(fecha, titulo, hora):
+    conn = sqlite3.connect(DB_FILE)
+    cur = conn.cursor()
+    cur.execute("SELECT completada FROM tareas WHERE fecha=? AND titulo=? AND hora=?", (fecha, titulo, hora))
+    row = cur.fetchone()
+    if not row:
+        conn.close()
+        return
+    nuevo = "No" if row[0] == "Sí" else "Sí"
+    cur.execute("UPDATE tareas SET completada=? WHERE fecha=? AND titulo=? AND hora=?", (nuevo, fecha, titulo, hora))
+    conn.commit()
+    conn.close()
+
+# -------------------------
+# Compatibilidad CSV (respaldo / export / import)
+# -------------------------
+def ensure_csv_exists():
+    if not os.path.exists(CSV_FILE):
+        with open(CSV_FILE, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["fecha","titulo","descripcion","tipo","hora","completada"])
+        logging.info("CSV inicial creado")
+
+def export_db_to_csv(path):
+    tareas = db_get_todas_tareas()
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["fecha","titulo","descripcion","tipo","hora","completada"])
         writer.writeheader()
         for t in tareas:
             writer.writerow(t)
+    logging.info(f"Exportado a CSV: {path}")
 
-# Ventana principal
+def import_csv_to_db(path, overwrite=False):
+    # Si overwrite=True borramos la tabla y la recreamos
+    if overwrite:
+        os.remove(DB_FILE) if os.path.exists(DB_FILE) else None
+        init_db()
+    with open(path, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        imported = 0
+        for row in reader:
+            if not row.get("fecha") or not row.get("titulo"):
+                continue
+            t = {
+                "fecha": row["fecha"],
+                "titulo": row["titulo"],
+                "descripcion": row.get("descripcion",""),
+                "tipo": row.get("tipo",""),
+                "hora": row.get("hora",""),
+                "completada": row.get("completada","No") or "No"
+            }
+            try:
+                db_insert_tarea(t)
+                imported += 1
+            except sqlite3.IntegrityError:
+                continue
+    logging.info(f"Importado CSV a DB desde {path}, importadas: {imported}")
+    return imported
+
+# -------------------------
+# Interfaz gráfica (UI)
+# -------------------------
 class CalendarioApp:
-    def __init__(self, root):  # CORREGIDO: __init__ en lugar de _init_
+    def __init__(self, root):
         self.root = root
-        self.root.title("Calendario con Gestor de Tareas")
-        self.root.geometry("800x550")
+        self.root.title("Calendario con Gestor de Tareas (Mejorado)")
+        self.root.geometry("920x600")
+        self.root.configure(bg="#1e1e1e")
 
-        # Label de bienvenida
-        self.label = ttk.Label(root, text="Calendario con Gestor de Tareas", font=("Helvetica", 16))
-        self.label.pack(pady=10)
+        self._config_style()
 
-        # Calendario
+        # Título
+        self.label = ttk.Label(root, text="📅 Calendario con Gestor de Tareas", font=("Helvetica", 18, "bold"))
+        self.label.pack(pady=8)
+
+        # Calendario (resaltar fecha actual)
         self.cal = Calendar(root, selectmode="day")
-        self.cal.pack(pady=10)
+        self.cal.pack(pady=8)
 
-        # Botones
-        frame_botones = ttk.Frame(root)
-        frame_botones.pack(pady=5)
+        # Panel botones
+        frame_bot = ttk.Frame(root)
+        frame_bot.pack(pady=6)
 
-        self.btn_mostrar = ttk.Button(frame_botones, text="Mostrar tareas", command=self.mostrar_tareas)
-        self.btn_mostrar.grid(row=0, column=0, padx=5)
+        ttk.Button(frame_bot, text="📄 Mostrar tareas", command=self.mostrar_tareas).grid(row=0,column=0,padx=4)
+        ttk.Button(frame_bot, text="➕ Agregar tarea", command=self.agregar_tarea).grid(row=0,column=1,padx=4)
+        ttk.Button(frame_bot, text="✏ Editar tarea", command=self.editar_tarea).grid(row=0,column=2,padx=4)
+        ttk.Button(frame_bot, text="🗑 Eliminar tarea", command=self.eliminar_tarea).grid(row=0,column=3,padx=4)
+        ttk.Button(frame_bot, text="✔ Marcar/Desmarcar", command=self.marcar_completada).grid(row=0,column=4,padx=4)
+        ttk.Button(frame_bot, text="⬇ Exportar CSV", command=self.exportar_csv_dialog).grid(row=0,column=5,padx=4)
+        ttk.Button(frame_bot, text="⬆ Importar CSV", command=self.importar_csv_dialog).grid(row=0,column=6,padx=4)
 
-        self.btn_agregar = ttk.Button(frame_botones, text="Agregar tarea", command=self.agregar_tarea)
-        self.btn_agregar.grid(row=0, column=1, padx=5)
-
-        self.btn_editar = ttk.Button(frame_botones, text="Editar tarea", command=self.editar_tarea)
-        self.btn_editar.grid(row=0, column=2, padx=5)
-
-        self.btn_eliminar = ttk.Button(frame_botones, text="Eliminar tarea", command=self.eliminar_tarea)
-        self.btn_eliminar.grid(row=0, column=3, padx=5)
-
-        self.btn_completar = ttk.Button(frame_botones, text="Marcar/Desmarcar completada", command=self.marcar_completada)
-        self.btn_completar.grid(row=0, column=4, padx=5)
-
-        # Treeview para mostrar tareas
-        self.tree = ttk.Treeview(root, columns=("titulo", "descripcion", "tipo", "hora", "completada"), show="headings")
+        # Treeview
+        self.tree = ttk.Treeview(root, columns=("titulo","descripcion","tipo","hora","completada"), show="headings", height=15)
         self.tree.heading("titulo", text="Título")
         self.tree.heading("descripcion", text="Descripción")
         self.tree.heading("tipo", text="Tipo")
         self.tree.heading("hora", text="Hora")
         self.tree.heading("completada", text="Completada")
-        self.tree.pack(fill="both", expand=True, pady=10)
+        self.tree.pack(fill="both", expand=True, pady=8)
+        self.tree.tag_configure("completada", background="#2f8f2f")
 
-        # Colores para tareas completadas
-        self.tree.tag_configure("completada", background="#d3ffd3")
+        # Inicialización DB/CSV
+        init_db()
+        ensure_csv_exists()
 
-    # Mostrar tareas
+        # Mostrar tareas por defecto fecha actual
+        self.mostrar_tareas()
+
+    def _config_style(self):
+        style = ttk.Style()
+        style.theme_use("clam")
+        style.configure("TButton", padding=6, font=("Helvetica", 10, "bold"))
+        style.configure("Treeview", font=("Helvetica", 10), rowheight=26)
+        style.map("TButton", background=[("active", "#0d7377")])
+
+    # Mostrar
     def mostrar_tareas(self):
         fecha = self.cal.get_date()
-        tareas = leer_tareas(fecha)
-        
-        # Limpiar treeview
+        tareas = db_get_tareas_por_fecha(fecha)
         for i in self.tree.get_children():
             self.tree.delete(i)
-            
-        # Mostrar tareas
         for t in tareas:
-            values = (t["titulo"], t["descripcion"], t["tipo"], t["hora"], t.get("completada", "No"))
             tag = "completada" if t.get("completada") == "Sí" else ""
-            self.tree.insert("", "end", values=values, tags=(tag,))
-            
+            self.tree.insert("", "end", values=(t["titulo"], t["descripcion"], t["tipo"], t["hora"], t["completada"]), tags=(tag,))
         if not tareas:
-            messagebox.showinfo("Info", f"No hay tareas para {fecha}")
+            messagebox.showinfo("Sin tareas", f"No hay tareas para {fecha}")
 
-    # Agregar tarea
+    # Subventana helper
+    def _crear_subventana(self, titulo):
+        win = tk.Toplevel(self.root)
+        win.title(titulo)
+        win.transient(self.root)
+        win.grab_set()
+        return win
+
+    # Agregar tarea con validaciones y control de duplicados
     def agregar_tarea(self):
         fecha = self.cal.get_date()
-        ventana = tk.Toplevel(self.root)
-        ventana.title("Agregar Tarea")
-        ventana.transient(self.root)  # Hacerla modal
-        ventana.grab_set()
+        win = self._crear_subventana("Agregar Tarea")
 
-        ttk.Label(ventana, text="Título:").grid(row=0, column=0, pady=5, sticky="e")
-        entrada_titulo = ttk.Entry(ventana, width=30)
-        entrada_titulo.grid(row=0, column=1, pady=5, padx=5)
+        ttk.Label(win, text="Título:").grid(row=0, column=0, sticky="e", pady=4, padx=4)
+        e_titulo = ttk.Entry(win, width=35); e_titulo.grid(row=0, column=1, pady=4)
 
-        ttk.Label(ventana, text="Descripción:").grid(row=1, column=0, pady=5, sticky="e")
-        entrada_desc = ttk.Entry(ventana, width=30)
-        entrada_desc.grid(row=1, column=1, pady=5, padx=5)
+        ttk.Label(win, text="Descripción:").grid(row=1, column=0, sticky="e", pady=4, padx=4)
+        e_desc = ttk.Entry(win, width=35); e_desc.grid(row=1, column=1, pady=4)
 
-        ttk.Label(ventana, text="Tipo:").grid(row=2, column=0, pady=5, sticky="e")
-        entrada_tipo = ttk.Entry(ventana, width=30)
-        entrada_tipo.grid(row=2, column=1, pady=5, padx=5)
+        ttk.Label(win, text="Tipo:").grid(row=2, column=0, sticky="e", pady=4, padx=4)
+        e_tipo = ttk.Entry(win, width=35); e_tipo.grid(row=2, column=1, pady=4)
 
-        ttk.Label(ventana, text="Hora (HH:MM):").grid(row=3, column=0, pady=5, sticky="e")
-        entrada_hora = ttk.Entry(ventana, width=30)
-        entrada_hora.grid(row=3, column=1, pady=5, padx=5)
+        ttk.Label(win, text="Hora (HH:MM):").grid(row=3, column=0, sticky="e", pady=4, padx=4)
+        e_hora = ttk.Entry(win, width=35); e_hora.grid(row=3, column=1, pady=4)
 
         def guardar():
-            titulo = entrada_titulo.get().strip()
-            if not titulo:
-                messagebox.showwarning("Atención", "El título no puede estar vacío")
-                return
-            descripcion = entrada_desc.get().strip()
-            tipo = entrada_tipo.get().strip()
-            hora = entrada_hora.get().strip()
-            nueva_tarea = {
-                "fecha": fecha, 
-                "titulo": titulo, 
-                "descripcion": descripcion, 
-                "tipo": tipo, 
-                "hora": hora, 
-                "completada": "No"
-            }
-            todas_tareas = self.leer_todas_tareas()
-            todas_tareas.append(nueva_tarea)
-            escribir_tareas(todas_tareas)
-            self.mostrar_tareas()
-            ventana.destroy()
+            titulo = e_titulo.get().strip()
+            descripcion = e_desc.get().strip()
+            tipo = e_tipo.get().strip()
+            hora = e_hora.get().strip()
 
-        ttk.Button(ventana, text="Guardar", command=guardar).grid(row=4, column=0, columnspan=2, pady=10)
+            if not titulo:
+                messagebox.showwarning("Atención", "El título es obligatorio")
+                return
+
+            if hora and not validar_hora(hora):
+                messagebox.showwarning("Atención", "Hora inválida (formato HH:MM)")
+                return
+
+            tarea = {"fecha": fecha, "titulo": titulo, "descripcion": descripcion, "tipo": tipo, "hora": hora, "completada": "No"}
+
+            try:
+                db_insert_tarea(tarea)
+                logging.info(f"Tarea insertada: {titulo} {fecha} {hora}")
+            except sqlite3.IntegrityError:
+                messagebox.showwarning("Duplicado", "Ya existe una tarea con la misma fecha, título y hora.")
+                return
+            except Exception as e:
+                logging.exception("Error al insertar tarea")
+                messagebox.showerror("Error", f"No se pudo guardar la tarea: {e}")
+                return
+
+            self.mostrar_tareas()
+            win.destroy()
+
+        ttk.Button(win, text="Guardar", command=guardar).grid(row=4, column=0, columnspan=2, pady=8)
 
     # Editar tarea
     def editar_tarea(self):
-        seleccionado = self.tree.selection()
-        if not seleccionado:
+        sel = self.tree.selection()
+        if not sel:
             messagebox.showwarning("Atención", "Seleccione una tarea")
             return
-        item = self.tree.item(seleccionado)
-        titulo_actual, descripcion_actual, tipo_actual, hora_actual, completada_actual = item["values"]
+        vals = self.tree.item(sel)["values"]
+        titulo_act, desc_act, tipo_act, hora_act, comp_act = vals
         fecha = self.cal.get_date()
-        
-        ventana = tk.Toplevel(self.root)
-        ventana.title("Editar Tarea")
-        ventana.transient(self.root)
-        ventana.grab_set()
+        win = self._crear_subventana("Editar Tarea")
 
-        ttk.Label(ventana, text="Título:").grid(row=0, column=0, pady=5, sticky="e")
-        entrada_titulo = ttk.Entry(ventana, width=30)
-        entrada_titulo.insert(0, titulo_actual)
-        entrada_titulo.grid(row=0, column=1, pady=5, padx=5)
-
-        ttk.Label(ventana, text="Descripción:").grid(row=1, column=0, pady=5, sticky="e")
-        entrada_desc = ttk.Entry(ventana, width=30)
-        entrada_desc.insert(0, descripcion_actual)
-        entrada_desc.grid(row=1, column=1, pady=5, padx=5)
-
-        ttk.Label(ventana, text="Tipo:").grid(row=2, column=0, pady=5, sticky="e")
-        entrada_tipo = ttk.Entry(ventana, width=30)
-        entrada_tipo.insert(0, tipo_actual)
-        entrada_tipo.grid(row=2, column=1, pady=5, padx=5)
-
-        ttk.Label(ventana, text="Hora (HH:MM):").grid(row=3, column=0, pady=5, sticky="e")
-        entrada_hora = ttk.Entry(ventana, width=30)
-        entrada_hora.insert(0, hora_actual)
-        entrada_hora.grid(row=3, column=1, pady=5, padx=5)
+        ttk.Label(win, text="Título:").grid(row=0, column=0, sticky="e", pady=4, padx=4)
+        e_titulo = ttk.Entry(win, width=35); e_titulo.insert(0, titulo_act); e_titulo.grid(row=0, column=1, pady=4)
+        ttk.Label(win, text="Descripción:").grid(row=1, column=0, sticky="e", pady=4, padx=4)
+        e_desc = ttk.Entry(win, width=35); e_desc.insert(0, desc_act); e_desc.grid(row=1, column=1, pady=4)
+        ttk.Label(win, text="Tipo:").grid(row=2, column=0, sticky="e", pady=4, padx=4)
+        e_tipo = ttk.Entry(win, width=35); e_tipo.insert(0, tipo_act); e_tipo.grid(row=2, column=1, pady=4)
+        ttk.Label(win, text="Hora (HH:MM):").grid(row=3, column=0, sticky="e", pady=4, padx=4)
+        e_hora = ttk.Entry(win, width=35); e_hora.insert(0, hora_act); e_hora.grid(row=3, column=1, pady=4)
 
         def guardar():
-            nuevo_titulo = entrada_titulo.get().strip()
-            if not nuevo_titulo:
-                messagebox.showwarning("Atención", "El título no puede estar vacío")
-                return
-            todas_tareas = self.leer_todas_tareas()
-            for t in todas_tareas:
-                if t["fecha"] == fecha and t["titulo"] == titulo_actual and t["hora"] == hora_actual:
-                    t["titulo"] = nuevo_titulo
-                    t["descripcion"] = entrada_desc.get().strip()
-                    t["tipo"] = entrada_tipo.get().strip()
-                    t["hora"] = entrada_hora.get().strip()
-                    break
-            escribir_tareas(todas_tareas)
-            self.mostrar_tareas()
-            ventana.destroy()
+            nuevo_titulo = e_titulo.get().strip()
+            nuevo_desc = e_desc.get().strip()
+            nuevo_tipo = e_tipo.get().strip()
+            nuevo_hora = e_hora.get().strip()
 
-        ttk.Button(ventana, text="Guardar", command=guardar).grid(row=4, column=0, columnspan=2, pady=10)
+            if not nuevo_titulo:
+                messagebox.showwarning("Atención", "El título es obligatorio")
+                return
+            if nuevo_hora and not validar_hora(nuevo_hora):
+                messagebox.showwarning("Atención", "Hora inválida (formato HH:MM)")
+                return
+
+            old = {"fecha": fecha, "titulo": titulo_act, "hora": hora_act}
+            nuevo = {"titulo": nuevo_titulo, "descripcion": nuevo_desc, "tipo": nuevo_tipo, "hora": nuevo_hora}
+
+            try:
+                db_update_tarea(old, nuevo)
+                logging.info(f"Tarea actualizada: {titulo_act} -> {nuevo_titulo}")
+            except Exception as e:
+                logging.exception("Error al actualizar")
+                messagebox.showerror("Error", f"No se pudo editar la tarea: {e}")
+                return
+
+            self.mostrar_tareas()
+            win.destroy()
+
+        ttk.Button(win, text="Guardar", command=guardar).grid(row=4, column=0, columnspan=2, pady=8)
 
     # Eliminar tarea
     def eliminar_tarea(self):
-        seleccionado = self.tree.selection()
-        if not seleccionado:
+        sel = self.tree.selection()
+        if not sel:
             messagebox.showwarning("Atención", "Seleccione una tarea")
             return
-        item = self.tree.item(seleccionado)
-        titulo, descripcion, tipo, hora, completada = item["values"]
+        vals = self.tree.item(sel)["values"]
+        titulo, _, _, hora, _ = vals
         fecha = self.cal.get_date()
-        if messagebox.askyesno("Confirmar", f"¿Desea eliminar la tarea '{titulo}'?"):
-            todas_tareas = self.leer_todas_tareas()
-            todas_tareas = [t for t in todas_tareas if not (t["fecha"] == fecha and t["titulo"] == titulo and t["hora"] == hora)]
-            escribir_tareas(todas_tareas)
+        if messagebox.askyesno("Confirmar", f"¿Eliminar tarea '{titulo}'?"):
+            try:
+                db_delete_tarea(fecha, titulo, hora)
+                logging.info(f"Tarea eliminada: {titulo} {fecha} {hora}")
+            except Exception as e:
+                logging.exception("Error al eliminar")
+                messagebox.showerror("Error", f"No se pudo eliminar: {e}")
             self.mostrar_tareas()
 
     # Marcar/desmarcar completada
     def marcar_completada(self):
-        seleccionado = self.tree.selection()
-        if not seleccionado:
+        sel = self.tree.selection()
+        if not sel:
             messagebox.showwarning("Atención", "Seleccione una tarea")
             return
-        item = self.tree.item(seleccionado)
-        titulo, descripcion, tipo, hora, completada = item["values"]
+        vals = self.tree.item(sel)["values"]
+        titulo, _, _, hora, _ = vals
         fecha = self.cal.get_date()
-        todas_tareas = self.leer_todas_tareas()
-        for t in todas_tareas:
-            if t["fecha"] == fecha and t["titulo"] == titulo and t["hora"] == hora:
-                t["completada"] = "No" if t.get("completada") == "Sí" else "Sí"
-                break
-        escribir_tareas(todas_tareas)
+        try:
+            db_toggle_completada(fecha, titulo, hora)
+            logging.info(f"Tarea toggled completada: {titulo}")
+        except Exception:
+            logging.exception("Error marcar completada")
+            messagebox.showerror("Error", "No se pudo cambiar el estado")
         self.mostrar_tareas()
 
-    # Leer todas las tareas
-    def leer_todas_tareas(self):
-        tareas = []
+    # Exportar CSV (diálogo)
+    def exportar_csv_dialog(self):
+        path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV files","*.csv")], initialfile="tareas_export.csv")
+        if not path:
+            return
         try:
-            with open(CSV_FILE, newline="", encoding="utf-8") as file:
-                reader = csv.DictReader(file)
-                for row in reader:
-                    tareas.append(row)
-        except FileNotFoundError:
-            # Si el archivo no existe, retornar lista vacía
-            pass
-        return tareas
+            export_db_to_csv(path)
+            messagebox.showinfo("Exportado", f"Exportado correctamente a:\n{path}")
+        except Exception:
+            logging.exception("Error exportar CSV")
+            messagebox.showerror("Error", "No se pudo exportar el CSV")
 
-# Ejecutar
-if __name__ == "__main__":  # CORREGIDO: __main__ en lugar de _main_
+    # Importar CSV (diálogo)
+    def importar_csv_dialog(self):
+        path = filedialog.askopenfilename(filetypes=[("CSV files","*.csv")])
+        if not path:
+            return
+        if messagebox.askyesno("Importar", "¿Desea sobrescribir la BD con el CSV seleccionado? (Sí = sobrescribir, No = añadir)"):
+            overwrite = True
+        else:
+            overwrite = False
+        try:
+            imported = import_csv_to_db(path, overwrite=overwrite)
+            messagebox.showinfo("Importado", f"Importadas {imported} tareas desde:\n{path}")
+            self.mostrar_tareas()
+        except Exception:
+            logging.exception("Error importar CSV")
+            messagebox.showerror("Error", "No se pudo importar el CSV")
+
+# -------------------------
+# Ejecutar aplicación
+# -------------------------
+if __name__ == "__main__":
+    init_db()
+    ensure_csv_exists()
     root = tk.Tk()
     app = CalendarioApp(root)
     root.mainloop()
