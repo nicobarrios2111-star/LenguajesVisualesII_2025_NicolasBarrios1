@@ -26,6 +26,33 @@ eliminar_tarea()	Borra la tarea seleccionada del listado.
 marcar_completada()	Marca o desmarca una tarea como completada.
 leer_todas_tareas()	Lee todas las tareas del archivo (sin filtrar por fecha).
 
+Cosas que agregué y cambie en el código actualizado 
+
+1. Almacenamiento SQLite (tareas.db): más seguro, consultas ordenadas, integridad (UNIQUE sobre fecha+titulo+hora).
+
+
+2. Compatibilidad/Respaldo CSV: tareas.csv sigue existiendo y hay funciones para exportar/importar. Útil para intercambio.
+
+
+3. Validaciones:
+
+Formato de hora HH:MM (00:00–23:59).
+
+Título obligatorio.
+
+Evita duplicados por UNIQUE(fecha, titulo, hora) (detecta y muestra aviso).
+
+
+4. Manejo de errores y logging: app.log registra operaciones importantes y excepciones.
+
+
+5. Export / Import con diálogo: botones para exportar DB a CSV e importar CSV (append o overwrite).
+
+
+6. UI: botones adicionales (export/import) 
+
+
+
 
 
 
